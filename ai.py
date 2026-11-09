@@ -91,9 +91,10 @@ def _gemini_generate(model: str, headers: dict, parts: list) -> dict:
     try:  # thinking off = much faster reads of simple receipts
         return _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
     except ApiError as e:
-        if e.code != 400 or "thinking" not in e.text.lower():
+        if e.code != 400 or "thinkingConfig" not in cfg:
             raise
-        cfg.pop("thinkingConfig")  # this model doesn't allow it; retry plainly
+        # Some models reject the thinking setting with a vague "invalid argument"; retry plainly.
+        cfg.pop("thinkingConfig")
         return _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
 
 
