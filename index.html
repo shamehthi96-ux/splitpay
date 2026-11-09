@@ -125,18 +125,32 @@ $("file").onchange = async e => {
     const dataUrl = await shrink(f);
     $("preview").src = dataUrl; show("preview");
     show("reading");
-    const rec = await api("/api/parse-receipt",{image:dataUrl.split(",")[1], media_type:"image/jpeg"});
+    const rec = await readReceipt(dataUrl.split(",")[1]);
     loadReceipt(rec);
   }catch(err){ $("err1").textContent = err.message; show("err1"); }
   show("reading", false);
 };
+async function readReceipt(b64){
+  const {job} = await api("/api/parse-receipt",{image:b64, media_type:"image/jpeg"});
+  const t0 = Date.now(); let blips = 0;
+  while(Date.now()-t0 < 180000){
+    await new Promise(r=>setTimeout(r,2000));
+    $("reading").textContent = "AI is reading the receipt… " + Math.round((Date.now()-t0)/1000) + "s";
+    let j;
+    try{ j = await (await fetch("/api/job/"+job)).json(); blips = 0; }
+    catch(e){ if(++blips > 5) throw new Error("Lost connection to the server. Check your network and try again."); continue; }
+    if(j.status === "done") return j.result;
+    if(j.status === "error") throw new Error(j.error);
+  }
+  throw new Error("The AI took too long. Try a clearer or smaller photo.");
+}
 $("demo").onclick = async () => loadReceipt(await api("/api/demo-receipt"));
 
 function shrink(file){ // downscale on-device so uploads stay small
   return new Promise((res,rej)=>{
     const img = new Image();
     img.onload = () => {
-      const max = 1600, k = Math.min(1, max/Math.max(img.width,img.height));
+      const max = 1280, k = Math.min(1, max/Math.max(img.width,img.height));
       const c = document.createElement("canvas"); c.width = img.width*k; c.height = img.height*k;
       c.getContext("2d").drawImage(img,0,0,c.width,c.height);
       res(c.toDataURL("image/jpeg",.85));

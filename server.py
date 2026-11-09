@@ -9,6 +9,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -33,6 +36,31 @@ from splitlogic import split_bill  # noqa: E402
 
 MAX_BODY = 12 * 1024 * 1024
 
+# Receipt reading can take a while; run it in the background and let the page poll,
+# so slow AI calls never hit a proxy/phone timeout.
+JOBS: dict[str, dict] = {}
+JOBS_LOCK = threading.Lock()
+
+
+def start_job(fn, *args) -> str:
+    job_id = uuid.uuid4().hex[:12]
+    now = time.time()
+    with JOBS_LOCK:
+        for k in [k for k, j in JOBS.items() if now - j["t"] > 900]:
+            del JOBS[k]
+        JOBS[job_id] = {"status": "pending", "t": now}
+
+    def run():
+        try:
+            out = {"status": "done", "result": fn(*args)}
+        except Exception as e:
+            out = {"status": "error", "error": str(e)}
+        with JOBS_LOCK:
+            JOBS[job_id].update(out)
+
+    threading.Thread(target=run, daemon=True).start()
+    return job_id
+
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "SplitPay/1.0"
@@ -55,6 +83,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/api/status":
             return self._json(200, {"ai": ai.ai_enabled(), "paypal": paypal.paypal_enabled(), "model": ai.model_name(), "provider": ai.provider()})
+        if path.startswith("/api/job/"):
+            with JOBS_LOCK:
+                job = JOBS.get(path.rsplit("/", 1)[-1])
+                snap = None if job is None else {k: v for k, v in job.items() if k != "t"}
+            return self._json(200 if snap else 404, snap or {"error": "unknown job"})
         # Only the page itself is served; source files and .env stay private.
         if path not in ("/", "/index.html"):
             return self._json(404, {"error": "not found"})
@@ -70,7 +103,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json()
             route = self.path.split("?")[0]
             if route == "/api/parse-receipt":
-                return self._json(200, ai.parse_receipt(body.get("image", ""), body.get("media_type", "image/jpeg")))
+                job = start_job(ai.parse_receipt, body.get("image", ""), body.get("media_type", "image/jpeg"))
+                return self._json(202, {"job": job})
             if route == "/api/demo-receipt":
                 return self._json(200, dict(ai.DEMO_RECEIPT))
             if route == "/api/assign-text":

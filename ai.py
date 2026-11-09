@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 
@@ -49,13 +50,33 @@ def model_name() -> str:
     return {"gemini": GEMINI_MODEL, "claude": CLAUDE_MODEL}.get(provider(), "demo")
 
 
-def _post_json(url: str, headers: dict, body: dict, label: str) -> dict:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            return json.load(resp)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"{label} API error {e.code}: {e.read().decode()[:300]}") from None
+class ApiError(RuntimeError):
+    def __init__(self, label: str, code: int, text: str):
+        super().__init__(f"{label} API error {code}: {text[:300]}")
+        self.code, self.text = code, text
+
+
+RETRY_DELAY = 2.0  # seconds, multiplied by attempt number (tests set 0)
+
+
+def _post_json(url: str, headers: dict, body: dict, label: str, attempts: int = 3) -> dict:
+    """POST JSON; retry briefly on busy/overloaded responses (429/5xx) and network blips."""
+    for attempt in range(1, attempts + 1):
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            err = ApiError(label, e.code, e.read().decode())
+            if e.code in (429, 500, 502, 503, 504) and attempt < attempts:
+                time.sleep(RETRY_DELAY * attempt)
+                continue
+            raise err from None
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            if attempt < attempts:
+                time.sleep(RETRY_DELAY * attempt)
+                continue
+            raise RuntimeError(f"{label} request failed: {e}") from None
 
 
 def _ask(prompt: str, image_b64: str | None = None, media_type: str = "image/jpeg", max_tokens: int = 1500) -> str:
@@ -65,12 +86,16 @@ def _ask(prompt: str, image_b64: str | None = None, media_type: str = "image/jpe
         if image_b64:
             parts.append({"inline_data": {"mime_type": media_type, "data": image_b64}})
         parts.append({"text": prompt})
-        data = _post_json(
-            f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent",
-            {"content-type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]},
-            {"contents": [{"parts": parts}], "generationConfig": {"responseMimeType": "application/json"}},
-            "Gemini",
-        )
+        url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent"
+        headers = {"content-type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]}
+        cfg = {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}}
+        try:  # thinking off = much faster reads of simple receipts
+            data = _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
+        except ApiError as e:
+            if e.code != 400 or "thinking" not in e.text.lower():
+                raise
+            cfg.pop("thinkingConfig")  # this model doesn't allow it; retry plainly
+            data = _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
         try:
             return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         except (KeyError, IndexError):
