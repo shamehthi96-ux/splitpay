@@ -34,6 +34,7 @@ With no keys the whole flow still works end to end: a built-in demo receipt is u
 |---|---|
 | `GEMINI_API_KEY` (free) | https://aistudio.google.com/apikey |
 | `GEMINI_MODEL` (optional) | defaults to `gemini-flash-latest` |
+| `GEMINI_FALLBACK_MODELS` (optional) | comma-separated models tried in order when the main one is busy (429/5xx) |
 | `ANTHROPIC_API_KEY` (optional) | Use Claude instead of Gemini; only read if `GEMINI_API_KEY` is empty |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | https://developer.paypal.com → Apps & Credentials → **Sandbox** |
 

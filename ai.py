@@ -14,6 +14,12 @@ CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 # "gemini-flash-latest" is Google's alias for the current Flash model; override with GEMINI_MODEL.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+# If the main model is busy/unavailable, try these in order (comma-separated env override).
+GEMINI_FALLBACKS = [
+    m.strip()
+    for m in os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest,gemini-2.5-flash,gemini-2.5-flash-lite").split(",")
+    if m.strip()
+]
 GEMINI_BASE = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
 
 # Used when no AI key is set, so judges can still click through the whole flow.
@@ -79,6 +85,18 @@ def _post_json(url: str, headers: dict, body: dict, label: str, attempts: int = 
             raise RuntimeError(f"{label} request failed: {e}") from None
 
 
+def _gemini_generate(model: str, headers: dict, parts: list) -> dict:
+    url = f"{GEMINI_BASE}/models/{model}:generateContent"
+    cfg = {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}}
+    try:  # thinking off = much faster reads of simple receipts
+        return _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
+    except ApiError as e:
+        if e.code != 400 or "thinking" not in e.text.lower():
+            raise
+        cfg.pop("thinkingConfig")  # this model doesn't allow it; retry plainly
+        return _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
+
+
 def _ask(prompt: str, image_b64: str | None = None, media_type: str = "image/jpeg", max_tokens: int = 1500) -> str:
     """Send a prompt (optionally with an image) to the active model and return its text."""
     if provider() == "gemini":
@@ -86,16 +104,17 @@ def _ask(prompt: str, image_b64: str | None = None, media_type: str = "image/jpe
         if image_b64:
             parts.append({"inline_data": {"mime_type": media_type, "data": image_b64}})
         parts.append({"text": prompt})
-        url = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent"
         headers = {"content-type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]}
-        cfg = {"responseMimeType": "application/json", "thinkingConfig": {"thinkingBudget": 0}}
-        try:  # thinking off = much faster reads of simple receipts
-            data = _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
-        except ApiError as e:
-            if e.code != 400 or "thinking" not in e.text.lower():
+        models = [GEMINI_MODEL] + [m for m in GEMINI_FALLBACKS if m != GEMINI_MODEL]
+        for i, model in enumerate(models):
+            try:
+                data = _gemini_generate(model, headers, parts)
+                break
+            except ApiError as e:
+                busy_or_missing = e.code in (404, 429, 500, 502, 503, 504)
+                if busy_or_missing and i < len(models) - 1:
+                    continue  # try the next model
                 raise
-            cfg.pop("thinkingConfig")  # this model doesn't allow it; retry plainly
-            data = _post_json(url, headers, {"contents": [{"parts": parts}], "generationConfig": cfg}, "Gemini")
         try:
             return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         except (KeyError, IndexError):

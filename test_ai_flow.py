@@ -106,5 +106,43 @@ class Resilience(unittest.TestCase):
         self.assertEqual(FlakyGemini.n, 3)  # 503 -> 400 (thinking) -> 200
 
 
+class BusyMain(BaseHTTPRequestHandler):
+    paths = []
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        type(self).paths.append(self.path)
+        if "/models/m1:" in self.path:
+            code, out = 503, {"error": {"message": "high demand"}}
+        else:
+            code, out = 200, {"candidates": [{"content": {"parts": [{"text": json.dumps({"1": ["A"]})}]}}]}
+        body = json.dumps(out).encode()
+        self.send_response(code)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+class Fallback(unittest.TestCase):
+    def test_switches_model_when_main_is_busy(self):
+        srv = HTTPServer(("127.0.0.1", 0), BusyMain)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        os.environ["GEMINI_API_KEY"] = "K"
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        import ai
+        ai.GEMINI_BASE = f"http://127.0.0.1:{srv.server_port}/v1beta"
+        ai.RETRY_DELAY = 0
+        ai.GEMINI_MODEL, ai.GEMINI_FALLBACKS = "m1", ["m2"]
+        items = [{"id": "1", "name": "Tea", "price": 3.0, "qty": 1}]
+        out = ai.assign_from_text("A had tea", items, ["A", "B"], "A")
+        srv.shutdown()
+        self.assertEqual(out, {"1": ["A"]})
+        self.assertEqual([p.split("/models/")[1].split(":")[0] for p in BusyMain.paths], ["m1", "m1", "m1", "m2"])
+
+
 if __name__ == "__main__":
     unittest.main()
