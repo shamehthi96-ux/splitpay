@@ -36,6 +36,9 @@
   .total b{font-size:18px}
   .res{padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
   .s-payer{color:var(--mute)} .s-sent{color:var(--ok)} .s-error{color:var(--bad)} .s-demo{color:#b54708}
+  .sheet{position:fixed;inset:0;background:#0007;display:flex;align-items:flex-end;justify-content:center;z-index:10}
+  .sheet.hidden{display:none}
+  .sheetbox{background:#fff;width:100%;max-width:560px;padding:14px 14px 22px;border-radius:16px 16px 0 0;display:grid;gap:8px}
   .hidden{display:none}
   .person{display:flex;gap:6px;margin-bottom:6px}
   .person input:first-child{flex:1}.person input:nth-child(2){flex:1.6}
@@ -53,7 +56,16 @@
     <div class="step">Step 1</div>
     <h2>Snap the bill</h2>
     <input type="file" id="file" accept="image/*" class="hidden">
-    <button id="pick">Take / upload a receipt photo</button>
+    <input type="file" id="cam" accept="image/*" capture="environment" class="hidden">
+    <button id="pickAny">Take / upload a receipt photo</button>
+    <div id="sheet" class="sheet hidden">
+      <div class="sheetbox">
+        <div class="mute" style="text-align:center">Add your bill</div>
+        <button id="optCam">Take a photo with camera</button>
+        <button class="alt" id="optFile">Choose from gallery / files</button>
+        <button class="alt" id="optCancel">Cancel</button>
+      </div>
+    </div>
     <div style="height:8px"></div>
     <button class="alt" id="demo">Use a demo receipt</button>
     <img id="preview" class="preview hidden" alt="receipt">
@@ -69,7 +81,7 @@
       <button class="alt small" id="addPerson">+ Add person</button>
       <label class="mute fixed">Currency <input id="currency" style="width:70px;display:inline-block;padding:6px" value="USD"></label>
     </div>
-    <p class="mute">The first person is you. Emails are where PayPal sends each payment request.</p>
+    <p class="mute">The first row is you (you paid, so you won't get a request; leave it blank to invoice everyone listed). Emails are where PayPal sends each request.</p>
   </section>
 
   <section class="card hidden" id="s3">
@@ -117,9 +129,15 @@ async function api(path, body){
 }
 
 // ---- Step 1: receipt ----
-$("pick").onclick = () => $("file").click();
-$("file").onchange = async e => {
+// One button, then a small menu: camera (capture="environment" opens the rear camera) or gallery/files.
+$("pickAny").onclick = () => show("sheet");
+$("optCam").onclick = () => { show("sheet", false); $("cam").click(); };
+$("optFile").onclick = () => { show("sheet", false); $("file").click(); };
+$("optCancel").onclick = () => show("sheet", false);
+$("sheet").onclick = e => { if(e.target.id === "sheet") show("sheet", false); };
+$("file").onchange = $("cam").onchange = async e => {
   const f = e.target.files[0]; if(!f) return;
+  e.target.value = "";   // allow choosing the same photo again
   show("err1", false);
   try{
     const dataUrl = await shrink(f);
@@ -252,6 +270,7 @@ $("send").onclick = async () => {
   try{
     const r = await api("/api/send-requests",{
       items:state.items, assignments:state.assignments, people:named(), tax:state.tax, tip:state.tip,
+      payer:(state.people[0].name||"").trim(),   // first row = you; blank means nobody is skipped
       merchant:state.merchant, currency:$("currency").value.trim().toUpperCase()||"USD", note:$("note").value
     });
     r.results.forEach(x=>{
