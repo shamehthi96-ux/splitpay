@@ -103,11 +103,16 @@ def _invoice_payload(person: dict, share: dict, merchant: str, currency: str, no
 def send_requests(shares: dict, people: list[dict], merchant: str, currency: str, note: str) -> list[dict]:
     """Create + send one invoice per person. Returns a result row per person."""
     emails = {p["name"]: p.get("email", "").strip() for p in people}
+    payer = people[0]["name"] if people else None  # the first person listed paid the bill
+    payer_note = "You paid the bill, so no request is needed for your own share."
     results = []
 
     if not paypal_enabled():
         for name, share in shares.items():
             if share["total_cents"] <= 0:
+                continue
+            if name == payer:
+                results.append({"name": name, "amount": cents_str(share["total_cents"]), "status": "payer", "detail": payer_note})
                 continue
             results.append(
                 {
@@ -124,6 +129,10 @@ def send_requests(shares: dict, people: list[dict], merchant: str, currency: str
         if share["total_cents"] <= 0:
             continue
         row = {"name": name, "amount": cents_str(share["total_cents"]), "currency": currency}
+        if name == payer:
+            row.update(status="payer", detail=payer_note)
+            results.append(row)
+            continue
         email = emails.get(name, "").strip().rstrip(".,;:")
         if not email:
             row.update(status="skipped", detail="No email address for this person.")

@@ -9,7 +9,7 @@ Built for the PayPal AI Hackathon.
 1. **Gemini vision** (Google AI) reads the receipt photo and returns items, tax and tip as structured data.
 2. You type something like *"Asha had the pizza, Ravi the burger, we all shared the nachos"*. **Gemini** turns that into item assignments. Tapping chips works too.
 3. The split is computed in integer cents: shared items are divided evenly, tax and tip are shared in proportion to each person's subtotal, and the shares always add up to the bill exactly.
-4. For each friend, the app creates and sends a **PayPal invoice** (Invoicing v2, sandbox) with their itemised share, as a payment request to their PayPal email.
+4. For each friend, the app creates and sends a **PayPal invoice** (Invoicing v2, sandbox) with their itemised share, as a payment request to their PayPal email. The first person listed is the one who paid, so they don't get a request.
 
 ## Run it locally (no installs needed)
 

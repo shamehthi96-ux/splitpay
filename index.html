@@ -35,7 +35,7 @@
   .total{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
   .total b{font-size:18px}
   .res{padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
-  .s-sent{color:var(--ok)} .s-error{color:var(--bad)} .s-demo{color:#b54708}
+  .s-payer{color:var(--mute)} .s-sent{color:var(--ok)} .s-error{color:var(--bad)} .s-demo{color:#b54708}
   .hidden{display:none}
   .person{display:flex;gap:6px;margin-bottom:6px}
   .person input:first-child{flex:1}.person input:nth-child(2){flex:1.6}
@@ -163,6 +163,7 @@ function shrink(file){ // downscale on-device so uploads stay small
 function loadReceipt(rec){
   state.merchant = rec.merchant || ""; state.items = rec.items; state.assignments = {};
   state.tax = rec.tax||0; state.tip = rec.tip||0;
+  $("results").innerHTML = "";   // don't show results from a previous receipt
   $("tax").value = state.tax; $("tip").value = state.tip; $("currency").value = rec.currency || "USD";
   renderPeople(); renderItems(); ["s2","s3","s4"].forEach(i=>show(i)); refresh();
 }
@@ -255,7 +256,7 @@ $("send").onclick = async () => {
     });
     r.results.forEach(x=>{
       const d = document.createElement("div"); d.className = "res";
-      d.innerHTML = `<b>${esc(x.name)}</b> · ${x.amount} <span class="s-${x.status}">[${x.status}]</span><br><span class="mute">${esc(x.detail||"")}</span>` +
+      d.innerHTML = `<b>${esc(x.name)}</b> · ${x.amount} <span class="s-${x.status}">[${x.status==="payer" ? "you paid" : x.status}]</span><br><span class="mute">${esc(x.detail||"")}</span>` +
         (x.link ? `<br><a href="${esc(x.link)}" target="_blank" rel="noopener">View invoice</a>` : "");
       box.appendChild(d);
     });

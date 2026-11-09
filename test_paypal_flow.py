@@ -66,6 +66,7 @@ class PayPalFlow(unittest.TestCase):
         paypal.BASE = os.environ["PAYPAL_BASE_URL"]
 
         shares = {
+            "Me": {"items": [{"name": "Soda", "cents": 200}], "tax_cents": 0, "tip_cents": 0, "total_cents": 200},
             "Asha": {"items": [{"name": "Pizza", "cents": 1400}], "tax_cents": 140, "tip_cents": 0, "total_cents": 1540},
             "Ravi": {"items": [{"name": "Burger", "cents": 1250}], "tax_cents": 125, "tip_cents": 300, "total_cents": 1675},
             "NoEmail": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
@@ -74,6 +75,7 @@ class PayPalFlow(unittest.TestCase):
             "Indian": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
         }
         people = [
+            {"name": "Me", "email": "me@example.com"},  # first person = payer, never invoiced
             {"name": "Asha", "email": "asha@example.com"},
             {"name": "Ravi", "email": "ravi@example.com"},
             {"name": "NoEmail", "email": ""},
@@ -85,6 +87,8 @@ class PayPalFlow(unittest.TestCase):
         srv.shutdown()
 
         by = {r["name"]: r for r in rows}
+        self.assertEqual(by["Me"]["status"], "payer")
+        self.assertNotIn("me@example.com", RECIPIENT.values())
         self.assertEqual(by["Asha"]["status"], "sent")
         self.assertEqual(by["Ravi"]["status"], "sent")
         self.assertEqual(by["NoEmail"]["status"], "skipped")
@@ -105,6 +109,23 @@ class PayPalFlow(unittest.TestCase):
         names = [i["name"] for i in payload["items"]]
         self.assertEqual(names, ["Burger", "Tax share", "Tip share"])
         self.assertEqual(sum(1 for c in CALLS if c[0].endswith("/send")), 4)
+
+
+class DemoMode(unittest.TestCase):
+    def test_payer_labelled_without_credentials(self):
+        saved = {k: os.environ.pop(k, None) for k in ("PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET")}
+        try:
+            import paypal
+            shares = {
+                "Me": {"items": [], "tax_cents": 0, "tip_cents": 0, "total_cents": 500},
+                "Bo": {"items": [], "tax_cents": 0, "tip_cents": 0, "total_cents": 700},
+            }
+            rows = paypal.send_requests(shares, [{"name": "Me", "email": ""}, {"name": "Bo", "email": "b@x.com"}], "", "USD", "")
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+        self.assertEqual([r["status"] for r in rows], ["payer", "demo"])
 
 
 if __name__ == "__main__":
