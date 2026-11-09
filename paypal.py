@@ -6,12 +6,14 @@ import base64
 import datetime
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from splitlogic import cents_str
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 BASE = os.environ.get("PAYPAL_BASE_URL", "https://api-m.sandbox.paypal.com")
 
 
@@ -40,6 +42,18 @@ def _request(method, path, body=None, token=None, form=None, basic=None):
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"PayPal {method} {path} -> {e.code}: {e.read().decode()[:400]}") from None
+
+
+def _hint(msg: str) -> str:
+    low = msg.lower()
+    if "within india" in low or "inr_foreign_currency" in low:
+        return (
+            "PayPal does not allow invoices to customers inside India from an India-based account. "
+            "For testing, use a sandbox recipient account whose country is NOT India (e.g. United States). "
+        )
+    if "email_address" in low:
+        return "PayPal rejected this email address; check it for typos. "
+    return ""
 
 
 def get_token() -> str:
@@ -110,15 +124,21 @@ def send_requests(shares: dict, people: list[dict], merchant: str, currency: str
         if share["total_cents"] <= 0:
             continue
         row = {"name": name, "amount": cents_str(share["total_cents"]), "currency": currency}
-        if not emails.get(name):
+        email = emails.get(name, "").strip().rstrip(".,;:")
+        if not email:
             row.update(status="skipped", detail="No email address for this person.")
             results.append(row)
             continue
+        if not EMAIL_RE.match(email):
+            row.update(status="skipped", detail=f"'{email}' doesn't look like an email address.")
+            results.append(row)
+            continue
+        href = ""
         try:
             created = _request(
                 "POST",
                 "/v2/invoicing/invoices",
-                body=_invoice_payload({"name": name, "email": emails[name]}, share, merchant, currency, note),
+                body=_invoice_payload({"name": name, "email": email}, share, merchant, currency, note),
                 token=token,
             )
             href = created["href"]
@@ -135,6 +155,11 @@ def send_requests(shares: dict, people: list[dict], merchant: str, currency: str
                 detail="Invoice sent via PayPal sandbox.",
             )
         except Exception as e:  # keep going so one bad email doesn't block the rest
-            row.update(status="error", detail=str(e))
+            if href:  # don't leave an unsent draft behind
+                try:
+                    _request("DELETE", href, token=token)
+                except Exception:
+                    pass
+            row.update(status="error", detail=_hint(str(e)) + str(e))
         results.append(row)
     return results

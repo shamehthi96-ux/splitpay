@@ -60,6 +60,7 @@ python3 -m unittest discover -s . -v
 
 ## Limitations
 
+- **India:** PayPal does not let India-based accounts send invoices to customers inside India (sandbox accounts created with country India behave the same). Create the sandbox business account and the recipient accounts with a country such as the United States.
 - Sandbox only by default; switch `PAYPAL_BASE_URL` to the live API at your own risk.
 - Receipt reading is only as good as the photo, and extracted items/prices can't be edited in the UI yet. Check them against the bill before sending requests.
 - Invoices need each friend's PayPal email.

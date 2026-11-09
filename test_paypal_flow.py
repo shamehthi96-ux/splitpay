@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CALLS = []
+RECIPIENT = {}  # invoice path -> recipient email
 
 
 class FakePayPal(BaseHTTPRequestHandler):
@@ -25,9 +26,16 @@ class FakePayPal(BaseHTTPRequestHandler):
         if self.path == "/v1/oauth2/token":
             out, code = {"access_token": "TOKEN123"}, 200
         elif self.path == "/v2/invoicing/invoices":
-            out, code = {"rel": "x", "href": f"{base}/v2/invoicing/invoices/INV2-{len(CALLS)}", "method": "GET"}, 201
+            inv = f"/v2/invoicing/invoices/INV2-{len(CALLS)}"
+            RECIPIENT[inv] = json.loads(raw)["primary_recipients"][0]["billing_info"]["email_address"]
+            out, code = {"rel": "x", "href": f"{base}{inv}", "method": "GET"}, 201
         elif self.path.endswith("/send"):
-            out, code = {"href": f"{base}/invoice/p/#ABC"}, 200
+            inv = self.path[: -len("/send")]
+            if "india" in RECIPIENT.get(inv, ""):
+                out, code = {"name": "MEDIA_TYPE_NOT_ACCEPTABLE", "details": [{"issue": "INR_FOREIGN_CURRENCY_BLOCKED",
+                             "description": "PayPal is unable to send invoices to customers within India."}]}, 406
+            else:
+                out, code = {"href": f"{base}/invoice/p/#ABC"}, 200
         else:
             out, code = {"error": "nope"}, 404
         body = json.dumps(out).encode()
@@ -36,6 +44,11 @@ class FakePayPal(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_DELETE(self):
+        CALLS.append(("DELETE " + self.path, self.headers.get("authorization", ""), ""))
+        self.send_response(204)
+        self.end_headers()
 
     def log_message(self, *a):
         pass
@@ -56,11 +69,17 @@ class PayPalFlow(unittest.TestCase):
             "Asha": {"items": [{"name": "Pizza", "cents": 1400}], "tax_cents": 140, "tip_cents": 0, "total_cents": 1540},
             "Ravi": {"items": [{"name": "Burger", "cents": 1250}], "tax_cents": 125, "tip_cents": 300, "total_cents": 1675},
             "NoEmail": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
+            "Dotty": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
+            "Typo": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
+            "Indian": {"items": [{"name": "Tea", "cents": 300}], "tax_cents": 0, "tip_cents": 0, "total_cents": 300},
         }
         people = [
             {"name": "Asha", "email": "asha@example.com"},
             {"name": "Ravi", "email": "ravi@example.com"},
             {"name": "NoEmail", "email": ""},
+            {"name": "Dotty", "email": " dotty@example.com. "},
+            {"name": "Typo", "email": "not-an-email"},
+            {"name": "Indian", "email": "buyer@india.example.com"},
         ]
         rows = paypal.send_requests(shares, people, "Demo Bistro", "USD", "thanks!")
         srv.shutdown()
@@ -69,17 +88,23 @@ class PayPalFlow(unittest.TestCase):
         self.assertEqual(by["Asha"]["status"], "sent")
         self.assertEqual(by["Ravi"]["status"], "sent")
         self.assertEqual(by["NoEmail"]["status"], "skipped")
+        self.assertEqual(by["Typo"]["status"], "skipped")        # invalid email never reaches PayPal
+        self.assertEqual(by["Dotty"]["status"], "sent")          # trailing dot/space cleaned up
+        self.assertEqual(by["Indian"]["status"], "error")
+        self.assertIn("NOT India", by["Indian"]["detail"])        # friendly hint shown
+        self.assertTrue(any(c[0].startswith("DELETE ") for c in CALLS))  # unsent draft removed
+        self.assertIn("dotty@example.com", RECIPIENT.values())
 
         token_call = CALLS[0]
         self.assertTrue(token_call[1].startswith("Basic "))
         creates = [c for c in CALLS if c[0] == "/v2/invoicing/invoices"]
-        self.assertEqual(len(creates), 2)
+        self.assertEqual(len(creates), 4)
         self.assertTrue(all(c[1] == "Bearer TOKEN123" for c in creates))
         payload = json.loads(creates[1][2])
         self.assertEqual(payload["primary_recipients"][0]["billing_info"]["email_address"], "ravi@example.com")
         names = [i["name"] for i in payload["items"]]
         self.assertEqual(names, ["Burger", "Tax share", "Tip share"])
-        self.assertEqual(sum(1 for c in CALLS if c[0].endswith("/send")), 2)
+        self.assertEqual(sum(1 for c in CALLS if c[0].endswith("/send")), 4)
 
 
 if __name__ == "__main__":

@@ -30,11 +30,11 @@
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .chip{padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:#fff;font-size:14px;cursor:pointer;user-select:none}
   .chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
-  .mute{color:var(--mute);font-size:14px}
+  .mute{color:var(--mute);font-size:14px;overflow-wrap:anywhere;word-break:break-word}
   .warn{color:var(--bad);font-size:14px}
   .total{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
   .total b{font-size:18px}
-  .res{padding:8px 0;border-top:1px solid var(--line)}
+  .res{padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}
   .s-sent{color:var(--ok)} .s-error{color:var(--bad)} .s-demo{color:#b54708}
   .hidden{display:none}
   .person{display:flex;gap:6px;margin-bottom:6px}
@@ -161,7 +161,7 @@ function renderPeople(){
     d.innerHTML = `<input placeholder="${i===0?"You":"Friend "+i}" value="${esc(p.name)}"><input type="email" placeholder="PayPal email" value="${esc(p.email)}">`;
     const [n,m] = d.querySelectorAll("input");
     n.oninput = () => { renamePerson(i, n.value); };
-    m.oninput = () => { p.email = m.value; };
+    m.oninput = () => { p.email = m.value.trim(); };
     box.appendChild(d);
   });
 }
