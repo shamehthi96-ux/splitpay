@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitPay</title>
+<style>
+  :root{--bg:#f5f7fa;--card:#fff;--ink:#14213d;--mute:#667085;--line:#e4e7ec;--blue:#0070e0;--navy:#003087;--ok:#067647;--bad:#b42318;--chip:#eef4ff}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{background:var(--navy);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+  header h1{margin:0;font-size:20px}
+  .badges span{font-size:11px;padding:2px 8px;border-radius:99px;background:#ffffff26;margin-left:4px}
+  .badges .on{background:#12b76a}
+  main{max-width:560px;margin:0 auto;padding:14px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+  .card h2{margin:0 0 8px;font-size:17px}
+  .step{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}
+  button{font:inherit;border:0;border-radius:10px;padding:12px 14px;background:var(--blue);color:#fff;font-weight:600;width:100%;cursor:pointer}
+  button.alt{background:var(--chip);color:var(--blue)}
+  button.small{width:auto;padding:6px 10px;font-size:14px}
+  button:disabled{opacity:.5}
+  input,textarea{font:inherit;width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  .row{display:flex;gap:8px;align-items:center}
+  .row>*{flex:1}
+  .row>.fixed{flex:none}
+  .item{border-top:1px solid var(--line);padding:10px 0}
+  .item:first-of-type{border-top:0}
+  .item .top{display:flex;justify-content:space-between;font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:#fff;font-size:14px;cursor:pointer;user-select:none}
+  .chip.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .mute{color:var(--mute);font-size:14px}
+  .warn{color:var(--bad);font-size:14px}
+  .total{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+  .total b{font-size:18px}
+  .res{padding:8px 0;border-top:1px solid var(--line)}
+  .s-sent{color:var(--ok)} .s-error{color:var(--bad)} .s-demo{color:#b54708}
+  .hidden{display:none}
+  .person{display:flex;gap:6px;margin-bottom:6px}
+  .person input:first-child{flex:1}.person input:nth-child(2){flex:1.6}
+  img.preview{max-width:100%;border-radius:10px;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>SplitPay</h1>
+  <div class="badges"><span id="b-ai">AI</span><span id="b-pp">PayPal</span></div>
+</header>
+<main>
+
+  <section class="card" id="s1">
+    <div class="step">Step 1</div>
+    <h2>Snap the bill</h2>
+    <input type="file" id="file" accept="image/*" class="hidden">
+    <button id="pick">Take / upload a receipt photo</button>
+    <div style="height:8px"></div>
+    <button class="alt" id="demo">Use a demo receipt</button>
+    <img id="preview" class="preview hidden" alt="receipt">
+    <p class="mute hidden" id="reading">AI is reading the receipt…</p>
+    <p class="warn hidden" id="err1"></p>
+  </section>
+
+  <section class="card hidden" id="s2">
+    <div class="step">Step 2</div>
+    <h2>Who's at the table?</h2>
+    <div id="people"></div>
+    <div class="row">
+      <button class="alt small" id="addPerson">+ Add person</button>
+      <label class="mute fixed">Currency <input id="currency" style="width:70px;display:inline-block;padding:6px" value="USD"></label>
+    </div>
+    <p class="mute">The first person is you. Emails are where PayPal sends each payment request.</p>
+  </section>
+
+  <section class="card hidden" id="s3">
+    <div class="step">Step 3</div>
+    <h2>Who had what?</h2>
+    <textarea id="say" rows="2" placeholder="Just tell me: “Asha had the pizza and a lemonade, Ravi the burger, we all shared the nachos”"></textarea>
+    <div style="height:8px"></div>
+    <button class="alt" id="aiAssign">Let AI assign items</button>
+    <p class="warn hidden" id="err3"></p>
+    <div id="items" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:8px">
+      <label class="mute">Tax <input id="tax" type="number" step="0.01" min="0"></label>
+      <label class="mute">Tip <input id="tip" type="number" step="0.01" min="0"></label>
+    </div>
+  </section>
+
+  <section class="card hidden" id="s4">
+    <div class="step">Step 4</div>
+    <h2>Everyone's share</h2>
+    <div id="summary"></div>
+    <p class="warn hidden" id="unassigned"></p>
+    <input id="note" placeholder="Note for the request (optional)" style="margin:10px 0">
+    <button id="send">Send PayPal payment requests</button>
+    <div id="results"></div>
+  </section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const state = {merchant:"", items:[], assignments:{}, people:[{name:"",email:""},{name:"",email:""}], tax:0, tip:0};
+
+const money = c => (c/100).toFixed(2);
+const show = (id, on=true) => $(id).classList.toggle("hidden", !on);
+
+fetch("/api/status").then(r=>r.json()).then(s=>{
+  $("b-ai").classList.toggle("on", s.ai); $("b-ai").textContent = s.ai ? "AI live" : "AI demo";
+  $("b-pp").classList.toggle("on", s.paypal); $("b-pp").textContent = s.paypal ? "PayPal sandbox" : "PayPal demo";
+});
+
+async function api(path, body){
+  const r = await fetch(path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body||{})});
+  const j = await r.json();
+  if(!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+
+// ---- Step 1: receipt ----
+$("pick").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  show("err1", false);
+  try{
+    const dataUrl = await shrink(f);
+    $("preview").src = dataUrl; show("preview");
+    show("reading");
+    const rec = await api("/api/parse-receipt",{image:dataUrl.split(",")[1], media_type:"image/jpeg"});
+    loadReceipt(rec);
+  }catch(err){ $("err1").textContent = err.message; show("err1"); }
+  show("reading", false);
+};
+$("demo").onclick = async () => loadReceipt(await api("/api/demo-receipt"));
+
+function shrink(file){ // downscale on-device so uploads stay small
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.onload = () => {
+      const max = 1600, k = Math.min(1, max/Math.max(img.width,img.height));
+      const c = document.createElement("canvas"); c.width = img.width*k; c.height = img.height*k;
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      res(c.toDataURL("image/jpeg",.85));
+    };
+    img.onerror = () => rej(new Error("Could not read that image"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function loadReceipt(rec){
+  state.merchant = rec.merchant || ""; state.items = rec.items; state.assignments = {};
+  state.tax = rec.tax||0; state.tip = rec.tip||0;
+  $("tax").value = state.tax; $("tip").value = state.tip; $("currency").value = rec.currency || "USD";
+  renderPeople(); renderItems(); ["s2","s3","s4"].forEach(i=>show(i)); refresh();
+}
+
+// ---- Step 2: people ----
+function renderPeople(){
+  const box = $("people"); box.innerHTML = "";
+  state.people.forEach((p,i)=>{
+    const d = document.createElement("div"); d.className = "person";
+    d.innerHTML = `<input placeholder="${i===0?"You":"Friend "+i}" value="${esc(p.name)}"><input type="email" placeholder="PayPal email" value="${esc(p.email)}">`;
+    const [n,m] = d.querySelectorAll("input");
+    n.oninput = () => { renamePerson(i, n.value); };
+    m.oninput = () => { p.email = m.value; };
+    box.appendChild(d);
+  });
+}
+function renamePerson(i, v){
+  const old = state.people[i].name; state.people[i].name = v;
+  for(const k in state.assignments) state.assignments[k] = state.assignments[k].map(x=>x===old?v:x);
+  renderItems(); refresh();
+}
+$("addPerson").onclick = () => { state.people.push({name:"",email:""}); renderPeople(); renderItems(); };
+const named = () => state.people.filter(p=>p.name.trim());
+
+// ---- Step 3: items ----
+function renderItems(){
+  const box = $("items"); box.innerHTML = "";
+  state.items.forEach(it=>{
+    const d = document.createElement("div"); d.className = "item";
+    d.innerHTML = `<div class="top"><span>${esc(it.name)}${it.qty>1?" ×"+it.qty:""}</span><span>${it.price.toFixed(2)}</span></div><div class="chips"></div>`;
+    const chips = d.querySelector(".chips");
+    const all = document.createElement("span"); all.className="chip"; all.textContent="Everyone";
+    all.onclick = () => { state.assignments[it.id] = named().map(p=>p.name); renderItems(); refresh(); };
+    chips.appendChild(all);
+    named().forEach(p=>{
+      const c = document.createElement("span");
+      const on = (state.assignments[it.id]||[]).includes(p.name);
+      c.className = "chip"+(on?" on":""); c.textContent = p.name;
+      c.onclick = () => {
+        const a = new Set(state.assignments[it.id]||[]);
+        a.has(p.name) ? a.delete(p.name) : a.add(p.name);
+        state.assignments[it.id] = [...a]; renderItems(); refresh();
+      };
+      chips.appendChild(c);
+    });
+    box.appendChild(d);
+  });
+}
+$("tax").oninput = e => { state.tax = parseFloat(e.target.value)||0; refresh(); };
+$("tip").oninput = e => { state.tip = parseFloat(e.target.value)||0; refresh(); };
+
+$("aiAssign").onclick = async () => {
+  show("err3", false);
+  const people = named();
+  if(people.length < 2){ $("err3").textContent = "Add at least two names first."; show("err3"); return; }
+  if(!$("say").value.trim()){ $("err3").textContent = "Describe who had what first."; show("err3"); return; }
+  $("aiAssign").disabled = true; $("aiAssign").textContent = "Thinking…";
+  try{
+    const r = await api("/api/assign-text",{text:$("say").value, items:state.items, people, me:people[0].name});
+    Object.assign(state.assignments, r.assignments); renderItems(); refresh();
+  }catch(err){ $("err3").textContent = err.message; show("err3"); }
+  $("aiAssign").disabled = false; $("aiAssign").textContent = "Let AI assign items";
+};
+
+// ---- Step 4: summary + send ----
+async function refresh(){
+  const people = named();
+  if(!people.length){ $("summary").innerHTML = '<p class="mute">Add names above.</p>'; return; }
+  const r = await api("/api/split",{items:state.items, assignments:state.assignments, people, tax:state.tax, tip:state.tip});
+  const box = $("summary"); box.innerHTML = "";
+  people.forEach(p=>{
+    const s = r.people[p.name];
+    const d = document.createElement("div"); d.className = "total";
+    d.innerHTML = `<span>${esc(p.name)}<br><span class="mute">${money(s.subtotal_cents)} + tax ${money(s.tax_cents)} + tip ${money(s.tip_cents)}</span></span><b>${money(s.total_cents)}</b>`;
+    box.appendChild(d);
+  });
+  const un = r.unassigned.map(id=>state.items.find(i=>i.id===id).name);
+  $("unassigned").textContent = un.length ? "Not assigned yet: " + un.join(", ") : "";
+  show("unassigned", un.length>0);
+  $("send").disabled = un.length>0 || people.length<2;
+}
+
+$("send").onclick = async () => {
+  const btn = $("send"); btn.disabled = true; btn.textContent = "Sending…";
+  const box = $("results"); box.innerHTML = "";
+  try{
+    const r = await api("/api/send-requests",{
+      items:state.items, assignments:state.assignments, people:named(), tax:state.tax, tip:state.tip,
+      merchant:state.merchant, currency:$("currency").value.trim().toUpperCase()||"USD", note:$("note").value
+    });
+    r.results.forEach(x=>{
+      const d = document.createElement("div"); d.className = "res";
+      d.innerHTML = `<b>${esc(x.name)}</b> · ${x.amount} <span class="s-${x.status}">[${x.status}]</span><br><span class="mute">${esc(x.detail||"")}</span>` +
+        (x.link ? `<br><a href="${esc(x.link)}" target="_blank" rel="noopener">View invoice</a>` : "");
+      box.appendChild(d);
+    });
+  }catch(err){ box.innerHTML = `<p class="warn">${esc(err.message)}</p>`; }
+  btn.disabled = false; btn.textContent = "Send PayPal payment requests";
+};
+
+function esc(s){ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+</script>
+</body>
+</html>
