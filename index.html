@@ -53,7 +53,10 @@
     <div class="step">Step 1</div>
     <h2>Snap the bill</h2>
     <input type="file" id="file" accept="image/*" class="hidden">
-    <button id="pick">Take / upload a receipt photo</button>
+    <input type="file" id="cam" accept="image/*" capture="environment" class="hidden">
+    <button id="pickCam">Take a photo of the bill</button>
+    <div style="height:8px"></div>
+    <button class="alt" id="pick">Upload from gallery</button>
     <div style="height:8px"></div>
     <button class="alt" id="demo">Use a demo receipt</button>
     <img id="preview" class="preview hidden" alt="receipt">
@@ -118,8 +121,10 @@ async function api(path, body){
 
 // ---- Step 1: receipt ----
 $("pick").onclick = () => $("file").click();
-$("file").onchange = async e => {
+$("pickCam").onclick = () => $("cam").click();   // capture="environment" opens the rear camera
+$("file").onchange = $("cam").onchange = async e => {
   const f = e.target.files[0]; if(!f) return;
+  e.target.value = "";   // allow choosing the same photo again
   show("err1", false);
   try{
     const dataUrl = await shrink(f);
