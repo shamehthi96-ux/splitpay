@@ -83,7 +83,7 @@ class PayPalFlow(unittest.TestCase):
             {"name": "Typo", "email": "not-an-email"},
             {"name": "Indian", "email": "buyer@india.example.com"},
         ]
-        rows = paypal.send_requests(shares, people, "Demo Bistro", "USD", "thanks!")
+        rows = paypal.send_requests(shares, people, "Demo Bistro", "USD", "thanks!", payer="Me")
         srv.shutdown()
 
         by = {r["name"]: r for r in rows}
@@ -120,12 +120,15 @@ class DemoMode(unittest.TestCase):
                 "Me": {"items": [], "tax_cents": 0, "tip_cents": 0, "total_cents": 500},
                 "Bo": {"items": [], "tax_cents": 0, "tip_cents": 0, "total_cents": 700},
             }
-            rows = paypal.send_requests(shares, [{"name": "Me", "email": ""}, {"name": "Bo", "email": "b@x.com"}], "", "USD", "")
+            rows = paypal.send_requests(shares, [{"name": "Me", "email": ""}, {"name": "Bo", "email": "b@x.com"}], "", "USD", "", payer="Me")
         finally:
             for k, v in saved.items():
                 if v is not None:
                     os.environ[k] = v
         self.assertEqual([r["status"] for r in rows], ["payer", "demo"])
+        # blank "You" row: nobody is treated as the payer, everyone listed is invoiced
+        rows = paypal.send_requests(shares, [{"name": "Me", "email": "a@x.com"}, {"name": "Bo", "email": "b@x.com"}], "", "USD", "")
+        self.assertEqual([r["status"] for r in rows], ["demo", "demo"])
 
 
 if __name__ == "__main__":

@@ -100,10 +100,13 @@ def _invoice_payload(person: dict, share: dict, merchant: str, currency: str, no
     }
 
 
-def send_requests(shares: dict, people: list[dict], merchant: str, currency: str, note: str) -> list[dict]:
-    """Create + send one invoice per person. Returns a result row per person."""
+def send_requests(shares: dict, people: list[dict], merchant: str, currency: str, note: str, payer: str = "") -> list[dict]:
+    """Create + send one invoice per person. Returns a result row per person.
+
+    `payer` is the name in the first (\"You\") row. That person paid the bill, so they get no request.
+    If the row was left blank, payer is "" and every listed person is invoiced."""
     emails = {p["name"]: p.get("email", "").strip() for p in people}
-    payer = people[0]["name"] if people else None  # the first person listed paid the bill
+    payer = payer.strip()
     payer_note = "You paid the bill, so no request is needed for your own share."
     results = []
 
@@ -111,7 +114,7 @@ def send_requests(shares: dict, people: list[dict], merchant: str, currency: str
         for name, share in shares.items():
             if share["total_cents"] <= 0:
                 continue
-            if name == payer:
+            if payer and name == payer:
                 results.append({"name": name, "amount": cents_str(share["total_cents"]), "status": "payer", "detail": payer_note})
                 continue
             results.append(
@@ -129,7 +132,7 @@ def send_requests(shares: dict, people: list[dict], merchant: str, currency: str
         if share["total_cents"] <= 0:
             continue
         row = {"name": name, "amount": cents_str(share["total_cents"]), "currency": currency}
-        if name == payer:
+        if payer and name == payer:
             row.update(status="payer", detail=payer_note)
             results.append(row)
             continue

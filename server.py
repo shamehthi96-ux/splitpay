@@ -131,7 +131,8 @@ class Handler(BaseHTTPRequestHandler):
                 if result["unassigned"]:
                     return self._json(400, {"error": "Some items are not assigned to anyone yet."})
                 rows = paypal.send_requests(
-                    result["people"], people, body.get("merchant", ""), body.get("currency", "USD"), body.get("note", "")
+                    result["people"], people, body.get("merchant", ""), body.get("currency", "USD"), body.get("note", ""),
+                    payer=body.get("payer", ""),
                 )
                 return self._json(200, {"results": rows})
             return self._json(404, {"error": "not found"})
